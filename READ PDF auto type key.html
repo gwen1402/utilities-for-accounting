@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Nhập hóa đơn PDF vào Bảng kê – Groq AI</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#667085;--bd:#d9dde5;--ac:#0b6e4f;--warn:#fff4d6;--err:#fde4e4;--ok:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1d222a;--tx:#e8ebf0;--mut:#98a2b3;--bd:#343b47;--ac:#34c38f;--warn:#4a3d12;--err:#4d2020;--ok:#1d222a}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 system-ui,"Segoe UI",sans-serif}
+main{max-width:1200px;margin:0 auto;padding:20px 16px 60px}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--mut);margin:0 0 16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px}.card h2{font-size:14px;margin:0 0 8px}
+label{display:block;font-size:12px;color:var(--mut);margin:6px 0 2px}
+input,button{font:inherit;color:inherit}input[type=text],input[type=password]{width:100%;padding:6px 8px;border:1px solid var(--bd);border-radius:6px;background:var(--bg)}
+button{padding:7px 14px;border:1px solid var(--bd);border-radius:6px;background:var(--card);cursor:pointer}button.p{background:var(--ac);border-color:var(--ac);color:#fff}button:disabled{opacity:.5}
+.drop{border:2px dashed var(--bd);border-radius:10px;padding:22px;text-align:center;color:var(--mut);cursor:pointer;display:block}.drop.o{border-color:var(--ac);color:var(--ac)}
+.note{font-size:12px;color:var(--mut);margin-top:6px}.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:14px 0}
+.wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;min-width:1300px}th,td{padding:4px 6px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:top}th{font-size:12px;color:var(--mut);white-space:nowrap}
+td input{width:100%;min-width:70px;padding:4px;border:1px solid transparent;border-radius:4px;background:transparent}td input:focus{border-color:var(--ac);background:var(--bg)}td input.n{text-align:right;min-width:90px}
+td input[type=checkbox]{width:auto;min-width:0}tr.warn{background:var(--warn)}tr.err{background:var(--err)}.msg{font-size:12px;min-width:170px}
+</style></head><body><main>
+<h1>Nhập hóa đơn PDF vào Bảng kê</h1>
+<p class="sub">Đọc PDF → Groq AI trích xuất → điền vào sheet <b>BANG KE HD</b> của file KHO TỔNG. Mọi thứ chạy trên máy bạn, chỉ gửi nội dung hóa đơn tới Groq.</p>
+<div class="grid">
+<div class="card"><h2>① Groq API</h2>
+<label>API key (lấy tại console.groq.com/keys)</label><input type="password" id="key" placeholder="gsk_...">
+<label>Model đọc văn bản</label><input type="text" id="model" list="ml" value="llama-3.3-70b-versatile">
+<label>Model đọc ảnh (PDF scan)</label><input type="text" id="vmodel" list="ml" value="meta-llama/llama-4-scout-17b-16e-instruct">
+<datalist id="ml"><option value="llama-3.3-70b-versatile"><option value="llama-3.1-8b-instant"><option value="meta-llama/llama-4-scout-17b-16e-instruct"></datalist>
+<div style="margin-top:8px"><button id="bmodels" type="button">Tải danh sách model từ Groq</button></div>
+<div class="note" id="minfo">Key lưu trong trình duyệt của bạn (localStorage). Trang tự chọn model đang có trên tài khoản của bạn.</div></div>
+<div class="card"><h2>② File Excel (KHO_TỔNG_CPT_40_HL.xls)</h2>
+<input type="file" id="xl" accept=".xls,.xlsx"><div class="note" id="xlinfo">Chưa nạp. Có thể bỏ qua và dùng nút "Sao chép để dán".</div></div>
+<div class="card"><h2>③ Hóa đơn PDF</h2>
+<label class="drop" id="drop">Kéo thả hoặc bấm để chọn nhiều file PDF<input type="file" id="pdf" accept=".pdf" multiple hidden></label></div>
+</div>
+<div class="bar"><button class="p" id="bcopy" disabled>Sao chép để dán vào Excel</button><button id="bxl" disabled>Tải file Excel đã nhập (.xlsx)</button><button id="bclr">Xóa danh sách</button><span id="sum" class="note"></span></div>
+<div class="wrap"><table><thead><tr><th>Nhập</th><th>STT</th><th>Tên đơn vị bán</th><th>MST</th><th>Nội dung HĐ</th><th>Ngày XHĐ</th><th>Số HĐ (cột F)</th><th>Ký hiệu (cột G)</th><th>Trước VAT</th><th>VAT</th><th>Tổng cộng</th><th>Ghi chú</th><th>Nội dung thuế</th><th>Trạng thái</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+<p class="note">Dòng vàng = cần kiểm tra (thiếu dữ liệu, tiền không khớp, hóa đơn trùng). Sửa trực tiếp trên bảng trước khi nhập. "Sao chép để dán" giữ nguyên 100% định dạng file gốc: bấm vào ô STT của dòng trống đầu tiên rồi Ctrl+V.</p>
+</main>
+<script>
+const $=s=>document.querySelector(s),LS={get(k){try{return localStorage.getItem(k)||''}catch(e){return ''}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const WORKER='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const KEYS=['ban','mst','nd','ngay','so','kh','truoc','vat','tong','gc','thue'],NUMK=['truoc','vat','tong'];
+const LBL={ban:'tên bên bán',ngay:'ngày',so:'số HĐ',truoc:'tiền trước VAT',tong:'tổng cộng'};
+const SYS=`Bạn là trợ lý kế toán Việt Nam. Trích xuất dữ liệu từ hóa đơn GTGT và CHỈ trả về một JSON với các khóa: ten_don_vi_ban (tên NGƯỜI BÁN, không phải người mua), mst_ban (mã số thuế người bán), ngay (ngày lập hóa đơn, dạng dd/mm/yyyy), ky_hieu (ký hiệu hóa đơn, ví dụ 1C26MPL), so_hd (số hóa đơn), noi_dung (tên hàng hóa/dịch vụ, ngắn gọn; nhiều dòng thì nối bằng "; "), truoc_vat (tổng tiền hàng chưa thuế), vat (tiền thuế GTGT, 0 nếu không có), tong_cong (tổng tiền thanh toán). Các số tiền là số nguyên VND, không dấu phân cách. Không có thông tin thì để null, tuyệt đối không bịa.`;
+let rows=[],wb=null,xlName='',startRow=null,startStt=1,freeRows=99,exist=new Set();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function num(v){if(typeof v==='number')return Math.round(v);if(!v)return 0;let s=String(v).replace(/[^\d,.-]/g,'');if(/,\d{1,2}$/.test(s))s=s.replace(/\./g,'').replace(',','.');else s=s.replace(/[.,]/g,'');return Math.round(parseFloat(s)||0)}
+function serial(d){const m=String(d||'').match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);return m?Math.round((Date.UTC(+m[3],m[2]-1,+m[1])-Date.UTC(1899,11,30))/864e5):''}
+function cty(n){n=(n||'').replace(/^(công ty|cty)\s+(tnhh|cổ phần|cp|trách nhiệm hữu hạn)?\s*(mtv|một thành viên)?\s*/i,'').trim().toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase());return 'CTY '+n}
+const used=()=>rows.filter(x=>x.use&&x.st!=='run'&&x.st!=='err');
+/* PDF */
+async function initPdf(){if(pdfjsLib._ok)return;const t=await(await fetch(WORKER)).text();pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob([t],{type:'text/javascript'}));pdfjsLib._ok=1}
+async function readPdf(f){await initPdf();const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;let text='';
+for(let i=1;i<=Math.min(pdf.numPages,3);i++){const c=await(await pdf.getPage(i)).getTextContent();let last=null,line='';for(const it of c.items){const y=Math.round(it.transform[5]/3);if(last!==null&&y!==last){text+=line+'\n';line=''}line+=it.str+' ';last=y}text+=line+'\n'}return{pdf,text}}
+async function pageImgs(pdf){const o=[];for(let i=1;i<=Math.min(pdf.numPages,2);i++){const p=await pdf.getPage(i),v=p.getViewport({scale:1.6}),c=document.createElement('canvas');c.width=v.width;c.height=v.height;await p.render({canvasContext:c.getContext('2d'),viewport:v}).promise;o.push(c.toDataURL('image/jpeg',.8))}return o}
+/* Groq */
+async function groq(messages,model,key){for(let t=0;t<2;t++){const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify({model,messages,temperature:0,response_format:{type:'json_object'}})});
+if(r.status===429&&!t){await new Promise(s=>setTimeout(s,(+r.headers.get('retry-after')||8)*1000));continue}
+const j=await r.json();if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));return JSON.parse(j.choices[0].message.content)}}
+/* Row logic */
+function fillRow(x,d){x.ban=(d.ten_don_vi_ban||'').trim();x.mst=String(d.mst_ban||'').replace(/\s/g,'');x.nd=d.noi_dung||'';x.ngay=d.ngay||'';x.kh=(d.ky_hieu||'').trim();
+const so=String(d.so_hd||'').trim();x.so=/^\d+$/.test(so)?String(parseInt(so,10)):so;x.truoc=num(d.truoc_vat);x.vat=num(d.vat);x.tong=num(d.tong_cong)||x.truoc+x.vat;if(!x.truoc&&x.tong)x.truoc=x.tong-x.vat;
+x.gc='';x.thue=x.nd&&x.ban?`Chi phí mua ${x.nd}-${cty(x.ban)}`:''}
+function recheck(x){if(x.st==='err')return;const m=[];KEYS.forEach(k=>{if(LBL[k]&&!x[k])m.push('thiếu '+LBL[k])});
+if(x.ngay&&!serial(x.ngay))m.push('ngày sai định dạng');if(Math.abs(num(x.truoc)+num(x.vat)-num(x.tong))>1)m.push('Trước VAT + VAT ≠ Tổng');
+const k=x.so+'|'+x.kh;if(exist.has(k))m.push('trùng hóa đơn đã có trong Excel');if(rows.some(y=>y!==x&&y.so&&y.so+'|'+y.kh===k&&rows.indexOf(y)<rows.indexOf(x)))m.push('trùng với dòng phía trên');
+x.dup=m.some(s=>s.startsWith('trùng'));x.st=m.length?'warn':'ok';x.msg=m.join('; ')}
+function render(){let n=0;$('#tb').innerHTML=rows.map((x,i)=>{const s=x.use&&x.st!=='err'&&x.st!=='run'?startStt+n++:'–';
+return`<tr class="${x.st}"><td><input type=checkbox data-i=${i} data-k=use ${x.use?'checked':''} ${x.st==='err'?'disabled':''}></td><td>${s}</td>`+KEYS.map(k=>`<td><input data-i=${i} data-k=${k} value="${esc(x[k])}" class="${NUMK.includes(k)?'n':''}"></td>`).join('')+`<td class=msg>${esc(x.msg||'')}<br><small>${esc(x.file)}</small></td><td><button data-del=${i}>✕</button></td></tr>`}).join('');
+const u=used();$('#bcopy').disabled=!u.length;$('#bxl').disabled=!u.length||!wb;
+$('#sum').textContent=rows.length?`${u.length}/${rows.length} dòng sẽ được nhập · Tổng tiền: ${u.reduce((a,x)=>a+num(x.tong),0).toLocaleString('vi-VN')} đ`+(wb&&u.length>freeRows?` · ⚠ Excel chỉ còn ${freeRows} dòng trống`:''):''}
+$('#tb').addEventListener('change',e=>{const t=e.target,i=t.dataset.i;if(i==null)return;const x=rows[i],k=t.dataset.k;if(k==='use')x.use=t.checked;else{x[k]=NUMK.includes(k)?num(t.value):t.value.trim();if(k==='so')x.so=/^\d+$/.test(x.so)?String(parseInt(x.so,10)):x.so}rows.forEach(recheck);render()});
+$('#tb').addEventListener('click',e=>{const d=e.target.dataset.del;if(d!=null){rows.splice(d,1);rows.forEach(recheck);render()}});
+let avail=[];
+async function loadModels(key){const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+key}});const j=await r.json();if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
+avail=j.data.map(m=>m.id).filter(id=>!/whisper|tts|guard|embed|orpheus|safeguard/i.test(id)).sort();
+$('#ml').innerHTML=avail.map(id=>`<option value="${id}">`).join('');
+const pt=['openai/gpt-oss-120b','llama-3.3-70b-versatile','openai/gpt-oss-20b','llama-3.1-8b-instant'],m=$('#model'),v=$('#vmodel');
+if(!avail.includes(m.value.trim()))m.value=pt.find(p=>avail.includes(p))||avail.find(id=>!/scout|maverick|vision|compound/i.test(id))||m.value;
+if(!avail.includes(v.value.trim()))v.value=avail.find(id=>/scout|maverick|vision/i.test(id))||v.value;
+$('#minfo').textContent=`Tài khoản có ${avail.length} model. Đang dùng: ${m.value} (văn bản), ${v.value} (ảnh).`}
+$('#bmodels').onclick=async()=>{const k=$('#key').value.trim();if(!k){alert('Hãy nhập Groq API key trước');return}try{await loadModels(k)}catch(e){$('#minfo').textContent='Lỗi: '+e.message}};
+async function run(files){const key=$('#key').value.trim();if(!key){alert('Hãy nhập Groq API key ở bước ①');return}
+if(!avail.length){try{await loadModels(key)}catch(e){$('#minfo').textContent='Không tải được danh sách model: '+e.message}}LS.set('gk',key);LS.set('gm',$('#model').value);LS.set('gv',$('#vmodel').value);
+for(const f of files){const x={file:f.name,use:true,st:'run',msg:'Đang đọc PDF…'};KEYS.forEach(k=>x[k]='');rows.push(x);render();
+try{const{pdf,text}=await readPdf(f);let d;
+if(text.replace(/\s/g,'').length>80){x.msg='Groq đang phân tích…';render();d=await groq([{role:'system',content:SYS},{role:'user',content:text.slice(0,14000)}],$('#model').value.trim(),key)}
+else{x.msg='PDF scan → đọc bằng ảnh…';render();const im=await pageImgs(pdf);d=await groq([{role:'system',content:SYS},{role:'user',content:[{type:'text',text:'Trích xuất dữ liệu hóa đơn trong ảnh.'},...im.map(u=>({type:'image_url',image_url:{url:u}}))]}],$('#vmodel').value.trim(),key)}
+x.st='ok';fillRow(x,d)}catch(e){x.st='err';x.use=false;x.msg='Lỗi: '+e.message}
+rows.forEach(recheck);rows.forEach(y=>{if(y===x&&y.dup)y.use=false});render()}}
+/* Excel */
+$('#xl').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{wb=XLSX.read(await f.arrayBuffer(),{type:'array'});xlName=f.name;const ws=wb.Sheets['BANG KE HD'];if(!ws)throw new Error('Không thấy sheet "BANG KE HD"');
+const a=XLSX.utils.sheet_to_json(ws,{header:1,defval:''}),h=a.findIndex(r=>String(r[0]).trim()==='STT');if(h<0)throw new Error('Không thấy dòng tiêu đề STT');
+exist=new Set();startRow=null;freeRows=0;for(let r=h+1;r<a.length;r++){if(/^tổng/i.test(String(a[r][0]).trim()))break;
+if(String(a[r][1]).trim()===''){if(startRow===null){startRow=r;startStt=parseInt(a[r][0])||r-h}freeRows++}else exist.add(String(a[r][5]).trim()+'|'+String(a[r][6]).trim())}
+if(startRow===null)throw new Error('Bảng kê đã hết dòng trống');
+$('#xlinfo').textContent=`Đã nạp "${f.name}". Dòng trống đầu tiên: dòng ${startRow+1} (STT ${startStt}); còn ${freeRows} dòng trống; ${exist.size} hóa đơn đã có.`}
+catch(err){wb=null;$('#xlinfo').textContent='Lỗi: '+err.message}rows.forEach(recheck);render()};
+$('#bxl').onclick=()=>{const ws=wb.Sheets['BANG KE HD'],u=used().slice(0,freeRows);let r=startRow;
+const set=(c,v,z)=>{if(v===''||v==null)return;const a=c+(r+1),o=typeof v==='number'?{t:'n',v}:{t:'s',v:String(v)};if(z)o.z=z;if(ws[a]&&ws[a].s)o.s=ws[a].s;ws[a]=o};
+u.forEach(x=>{set('B',x.ban);set('C',/^\d{1,15}$/.test(x.mst)?+x.mst:x.mst);set('D',x.nd);set('E',serial(x.ngay),'dd/mm/yyyy');set('F',/^\d+$/.test(x.so)?+x.so:x.so);set('G',x.kh);set('H',x.truoc,'#,##0');if(x.vat)set('I',x.vat,'#,##0');set('J',x.tong,'#,##0');set('K',x.gc);set('L',x.thue);r++});
+const a=XLSX.utils.sheet_to_json(ws,{header:1,defval:''}),t=a.findIndex(q=>/^tổng/i.test(String(q[0]).trim())),h=a.findIndex(q=>String(q[0]).trim()==='STT');
+if(t>0)['H','I','J'].forEach(c=>{let s=0;for(let i=h+1;i<t;i++){const v=ws[c+(i+1)];s+=v&&typeof v.v==='number'?v.v:0}const cell=ws[c+(t+1)]||{t:'n'};cell.t='n';cell.v=s;delete cell.w;ws[c+(t+1)]=cell});
+XLSX.writeFile(wb,xlName.replace(/\.xls\w?$/i,'')+'_da_nhap.xlsx',{bookType:'xlsx'})};
+$('#bcopy').onclick=async()=>{const tsv=used().map((x,i)=>[startStt+i,x.ban,x.mst,x.nd,serial(x.ngay),x.so,x.kh,x.truoc,x.vat||'',x.tong,x.gc,x.thue].map(v=>String(v).replace(/[\t\r\n]+/g,' ')).join('\t')).join('\n');
+try{await navigator.clipboard.writeText(tsv)}catch(e){const t=document.createElement('textarea');t.value=tsv;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove()}
+$('#bcopy').textContent='✓ Đã sao chép';setTimeout(()=>$('#bcopy').textContent='Sao chép để dán vào Excel',1800)};
+$('#bclr').onclick=()=>{rows=[];render()};
+const pick=fs=>{const f=[...fs].filter(x=>/\.pdf$/i.test(x.name));if(f.length)run(f)};
+$('#pdf').onchange=e=>{pick(e.target.files);e.target.value=''};
+const dz=$('#drop');dz.ondragover=e=>{e.preventDefault();dz.classList.add('o')};dz.ondragleave=()=>dz.classList.remove('o');dz.ondrop=e=>{e.preventDefault();dz.classList.remove('o');pick(e.dataTransfer.files)};
+$('#key').value=LS.get('gk');if(LS.get('gm'))$('#model').value=LS.get('gm');if(LS.get('gv'))$('#vmodel').value=LS.get('gv');
+</script></body></html>

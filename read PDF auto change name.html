@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Đổi tên PDF hóa đơn</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1d2330;--mut:#6b7385;--ac:#2563eb;--bd:#dfe3ea;--ok:#15803d;--warn:#b45309}
+@media (prefers-color-scheme:dark){:root{--bg:#14171f;--card:#1d222d;--tx:#e8ebf2;--mut:#98a1b5;--ac:#5b8cff;--bd:#2f3646;--ok:#4ade80;--warn:#fbbf24}}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:24px 16px 60px}
+h1{font-size:22px;margin:0 0 4px}
+p.sub{color:var(--mut);margin:0 0 18px}
+#drop{border:2px dashed var(--bd);background:var(--card);border-radius:12px;padding:32px;text-align:center;cursor:pointer}
+#drop.over{border-color:var(--ac)}
+button{background:var(--ac);color:#fff;border:0;border-radius:8px;padding:9px 16px;font-size:14px;cursor:pointer}
+button.sec{background:transparent;color:var(--ac);border:1px solid var(--ac)}
+.bar{display:flex;gap:10px;margin:16px 0;flex-wrap:wrap;align-items:center}
+.row{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px}
+.row .old{color:var(--mut);font-size:13px;word-break:break-all}
+.grid{display:grid;grid-template-columns:130px 130px 1fr;gap:8px;margin:8px 0}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.grid label{font-size:12px;color:var(--mut);display:block}
+input[type=text]{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit}
+.new{font-family:ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all;color:var(--ok)}
+.warn{color:var(--warn);font-size:12px}
+.cfg{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin:0 0 14px;display:grid;grid-template-columns:1fr 200px;gap:10px}
+.cfg label{font-size:12px;color:var(--mut);display:block}
+.cfg .full{grid-column:1/-1;font-size:13px}
+@media(max-width:640px){.cfg{grid-template-columns:1fr}}
+.note{font-size:12px;color:var(--mut);margin-top:4px}
+.hint{color:var(--mut);font-size:13px;margin-top:20px}
+</style>
+</head>
+<body>
+<main>
+<h1>Đổi tên PDF hóa đơn tự động</h1>
+<p class="sub">Đọc nội dung PDF → <b>YYYYMMDD_HDSỐ_TÊN CÔNG TY</b> (in hoa, không dấu). File xử lý ngay trên máy bạn, không tải lên đâu cả.</p>
+ 
+<div class="cfg">
+  <div class="full"><label>Nhà cung cấp AI</label><select id="prov" style="padding:7px 9px;border:1px solid var(--bd);border-radius:6px;background:var(--bg);color:var(--tx);font:inherit"><option value="gemini">Gemini (Google)</option><option value="claude">Claude (Anthropic)</option><option value="groq">Groq (miễn phí, rất nhanh)</option></select></div>
+  <div><label id="keylbl">API key</label><input type="text" id="key" placeholder="AIza..." autocomplete="off"></div>
+  <div><label>Model</label><input type="text" id="model" value="gemini-3.8-flash" list="models"><datalist id="models"></datalist></div>
+  <div class="full"><label>Công ty của bạn (người mua), sẽ không bao giờ bị lấy làm bên bán</label><input type="text" id="me" value="CÔNG TY TNHH XÂY DỰNG TUẤN LỄ"></div>
+  <div class="full"><label style="display:inline"><input type="checkbox" id="useai" checked> Dùng AI đọc hóa đơn (đọc được cả PDF scan)</label>
+  &nbsp;&nbsp;<label style="display:inline"><input type="checkbox" id="remember" checked> Nhớ key trên máy này</label>
+  <br><label style="display:inline"><input type="checkbox" id="onlymiss" checked> Chỉ gọi AI khi đọc thường bị thiếu thông tin (tiết kiệm hạn mức)</label>
+  &nbsp;&nbsp;<button class="sec" id="lm" type="button" style="padding:4px 10px;font-size:12px">Tải danh sách model</button></div>
+</div>
+<div id="drop">Kéo thả nhiều file PDF vào đây hoặc <b>bấm để chọn</b>
+<input id="file" type="file" accept="application/pdf" multiple hidden></div>
+ 
+<div class="bar" id="bar" hidden>
+  <button id="zip">Tải tất cả (ZIP)</button>
+  <button class="sec" id="clear">Xóa danh sách</button>
+  <span id="stat" class="sub" style="margin:0"></span>
+</div>
+<div id="list"></div>
+<p class="hint">Mỗi dòng đều sửa được trước khi tải. Nếu ô nào trống hoặc có cảnh báo vàng, hãy kiểm tra lại. PDF scan (ảnh) không có chữ nên không đọc được.</p>
+</main>
+ 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const items=[];
+const $=id=>document.getElementById(id);
+ 
+function clean(s){
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d').replace(/Đ/g,'D')
+    .toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
+}
+ 
+function shortItem(x){
+  let v=x.replace(/^TRANG TRI\s+/,'');
+  const k=v.lastIndexOf(' TAI ');
+  if(k>0&&v.slice(k+5).split(' ').length<=3&&v.slice(0,k).split(' ').length>=2)v=v.slice(0,k);
+  return v.trim();
+}
+function parsePYC(t){
+  const p=t.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/\s+/g,' ');
+  let date='',dept='',item='',m;
+  m=p.match(/Ngay\s*cap\s*\/?\s*(?:Issue\s*Date)?\s*:?\s*(\d{1,2})\s*[.\/\-]\s*(\d{1,2})\s*[.\/\-]\s*(\d{4})/i)||p.match(/Issue\s*Date\s*:?\s*(\d{1,2})\s*[.\/\-]\s*(\d{1,2})\s*[.\/\-]\s*(\d{4})/i);
+  if(m)date=m[3]+m[2].padStart(2,'0')+m[1].padStart(2,'0');
+  m=p.match(/PHONG\s*BAN\s*\/?\s*DU\W{0,2}\s*AN\s*:?\s*(.+?)\s*(?:DEPARTMENTS?|PROJECTS?|PHIEU)/i);
+  if(m)dept=clean(m[1]);
+  m=p.match(/Hang\s*muc\s*\/?\s*(?:Works\s*item)?\s*:?\s*(.+?)\s*(?:N[a-z]{1,3}y\s*yeu\s*cau|Request\s*Date|STT)/i);
+  if(m)item=shortItem(clean(m[1]));
+  return {kind:'pyc',date,dept,item};
+}
+function parseDoc(text){
+  const p=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d');
+  return /MATERIALS?\s*REQUEST|YEU\s*CAU\s*VAT\s*TU|BM-?\s*Procurement/i.test(p)?parsePYC(text):Object.assign({kind:'hd'},parse(text));
+}
+function applyParsed(it,f){
+  it.kind=f.kind||'hd';
+  (it.kind==='pyc'?['date','dept','item']:['date','num','seller']).forEach(k=>{if(f[k])it[k]=f[k];});
+}
+function isMissing(it){return it.kind==='pyc'?(!it.dept||!it.date||!it.item):(!it.date||!it.num||!it.seller);}
+const VENDOR=/SOFTDREAMS|EASYINVOICE|BKAV|MISA|M-?INVOICE|VIETTEL|FPT|THAI ?SON|CYBERLOTUS|CYBERBILL|NEWTEL|EFY|HILO|VIETINVOICE|SMARTSIGN|E-?INVOICE|HOADON|HÓA ĐƠN/i;
+const VENDOR_CTX=/cung cấp bởi|provided by|powered by|giải pháp|phát hành bởi|tra cứu|website|www\./i;
+const BUYER_CTX=/người mua|đơn vị mua|tên đơn vị|buyer|purchaser|khách hàng|company'?s name/i;
+function me(){const e=document.getElementById('me');return e?e.value.trim():'';}
+function isBuyer(v){const a=clean(v),b=clean(me());return !!b&&!!a&&(a.includes(b)||(a.length>8&&b.includes(a)));}
+function findSeller(t){
+  const cut=x=>x.replace(/\s*(?:Mã số thuế|MST|Tax code|Địa chỉ|Address|Điện thoại|Số tài khoản|Ngày ký|Date signed|Cần kiểm tra|Giải pháp|Hình thức|Họ tên người mua|Tên đơn vị mua|Tra cứu).*$/i,'').trim();
+  const tries=[
+    /(?:Đơn vị bán hàng|Tên đơn vị bán(?: hàng)?|Seller)\s*(?:\([^)]*\))?\s*:\s*(.+)/gi,
+    /Signed Digitally by\s*\)?\s*:?\s*(.+)/gi,
+    /(?:Đơn vị bán hàng|Tên đơn vị bán(?: hàng)?)\s*(?:\([^)]*\))?\s*:?\s*((?:CHI NHÁNH |CÔNG TY|TỔNG CÔNG TY|DOANH NGHIỆP|HỘ KINH DOANH|HKD|CỬA HÀNG|HỢP TÁC XÃ|NGÂN HÀNG)[^:]{3,80})/gi,
+    /((?:CHI NHÁNH |CÔNG TY|DOANH NGHIỆP TƯ NHÂN|HỘ KINH DOANH|HKD)[^:]{3,80}?)\s*(?:Mã số thuế|MST|Địa chỉ)/gi
+  ];
+  for(let k=0;k<tries.length;k++){
+    for(const m of t.matchAll(tries[k])){
+      const v=cut(m[1]);
+      if(v.length<5||v.length>90)continue;
+      if(VENDOR.test(v)||isBuyer(v))continue;
+      const before=t.slice(Math.max(0,m.index-70),m.index+8);
+      if(VENDOR_CTX.test(before))continue;
+      if(k>=2&&BUYER_CTX.test(t.slice(Math.max(0,m.index-45),m.index)))continue;
+      return v;
+    }
+  }
+  return '';
+}
+ 
+function parse(text){
+  const t=text.replace(/\s+/g,' ');
+  let date='',num='',seller='';
+  let m=t.match(/Ngày\s*(?:\(Date\))?\s*(\d{1,2})\s*tháng\s*(?:\(month\))?\s*(\d{1,2})\s*năm\s*(?:\(year\))?\s*(\d{4})/i);
+  if(m) date=m[3]+m[2].padStart(2,'0')+m[1].padStart(2,'0');
+  else if(m=t.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/)) date=m[3]+m[2].padStart(2,'0')+m[1].padStart(2,'0');
+  m=t.match(/Số\s*\(\s*(?:No|Invoice No)\.?\s*\)\s*:?\s*(\d{1,10})/i)||t.match(/Số\s*(?:hóa đơn)?\s*:\s*(\d{4,10})/i);
+  if(m) num=m[1];
+  seller=findSeller(t);
+  return {date,num,seller:clean(seller)};
+}
+ 
+async function readPdf(file){
+  const buf=await file.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf.slice(0))}).promise;
+  let text='';
+  for(let p=1;p<=Math.min(pdf.numPages,2);p++){
+    const c=await (await pdf.getPage(p)).getTextContent();
+    text+=c.items.map(i=>i.str).join(' ')+' ';
+  }
+  return {buf,text};
+}
+ 
+function newName(it){
+  const parts=[it.date,'HD',it.num,it.seller].filter(Boolean);
+  return clean(parts.join('_')).replace(/^(\d+)_HD/,'$1_HD')+'.pdf';
+}
+function fullName(it){
+  if(it.kind==='pyc')return [it.dept,it.date,it.date||it.dept||it.item?'PYC':'',it.item].filter(Boolean).map(x=>x.replace(/ +/g,'_')).join('_')+'.pdf';
+  return [it.date,it.num?'HD'+it.num:'',it.seller].filter(Boolean).join('_').replace(/_+/g,'_')+'.pdf';
+}
+ 
+function render(){
+  $('bar').hidden=!items.length;
+  $('stat').textContent=items.length+' file';
+  $('list').innerHTML='';
+  items.forEach((it,i)=>{
+    const d=document.createElement('div');d.className='row';
+    const miss=isMissing(it);
+    const F=it.kind==='pyc'?[['dept','Phòng ban / dự án'],['date','Ngày cấp (YYYYMMDD)'],['item','Hạng mục']]:[['date','Ngày (YYYYMMDD)'],['num','Số hóa đơn'],['seller','Tên bên bán']];
+    d.innerHTML=`<div class="old">${it.file.name}</div>
+    <div class="grid" ${it.kind==='pyc'?'style="grid-template-columns:150px 150px 1fr"':''}>
+      ${F.map(([k,l])=>`<div><label>${l}</label><input type="text" data-k="${k}" value="${it[k]||''}"></div>`).join('')}
+    </div>
+    <div class="new">→ ${fullName(it)}</div>
+    ${it.note?`<div class="note">${it.note}</div>`:''}
+    ${miss&&!it.note?'<div class="warn">Chưa đọc đủ thông tin, hãy điền thủ công hoặc bấm đọc lại bằng AI.</div>':''}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap"><button class="sec" data-dl="${i}">Tải file này</button><button class="sec" data-ai="${i}">Đọc lại bằng AI</button></div>`;
+    d.querySelector('[data-ai]').onclick=()=>runAI(it);
+    d.querySelectorAll('input').forEach(inp=>inp.oninput=()=>{
+      const v=inp.value;it[inp.dataset.k]=['seller','dept','item'].includes(inp.dataset.k)?clean(v):v.replace(/\D/g,'');
+      d.querySelector('.new').textContent='→ '+fullName(it);
+    });
+    d.querySelector('[data-dl]').onclick=()=>save(new Blob([it.buf],{type:'application/pdf'}),fullName(it));
+    $('list').appendChild(d);
+  });
+}
+ 
+function save(blob,name){
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+ 
+function useAI(){return $('useai').checked&&$('key').value.trim()}
+ 
+function b64(buf){
+  const u=new Uint8Array(buf);let s='';
+  for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));
+  return btoa(s);
+}
+ 
+const cfg={json:true,think:true};
+function normAI(o,kind){
+  const d8=String(o.date||'').replace(/\D/g,'').slice(0,8);
+  if(kind==='pyc')return {date:d8,dept:clean(String(o.dept||'')),item:shortItem(clean(String(o.item||'')))};
+  return {date:d8,num:String(o.number||'').replace(/\D/g,''),seller:clean(String(o.seller||''))};
+}
+async function gemini(buf,onRetry,attempt=0,mode='pdf',text='',json=true,kind='hd'){
+  const key=$('key').value.trim(),model=$('model').value.trim()||'gemini-3.8-flash';
+  const prompt=AIP(kind);
+  const body={contents:[{parts:mode==='pdf'?[{inline_data:{mime_type:'application/pdf',data:b64(buf)}},{text:prompt}]:[{text:prompt+'\n\nNội dung văn bản của hóa đơn:\n'+text.slice(0,6000)}]}],
+    generationConfig:Object.assign({temperature:0},cfg.json?{responseMimeType:'application/json'}:{},cfg.think?{thinkingConfig:{thinkingBudget:0}}:{})};
+  const url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent?key='+encodeURIComponent(key);
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  let j={};try{j=await r.json();}catch(e){}
+  const msg=(j.error&&j.error.message)||'';
+  if(r.status===429&&/quota/i.test(msg)){
+    const m=msg.match(/retry in ([0-9hms.]+)/i);
+    throw new Error('Đã hết hạn mức miễn phí của model này'+(m?' (thử lại sau '+m[1].replace(/\.\d+s/,'s')+')':'')+'. Hãy đổi model khác ở ô Model, hoặc dùng API key khác.');
+  }
+  if([429,500,503,504].includes(r.status)&&attempt<4){
+    const wait=3*Math.pow(2,attempt);
+    if(onRetry)onRetry(attempt+1,wait);
+    await new Promise(x=>setTimeout(x,wait*1000));
+    return gemini(buf,onRetry,attempt+1,mode,text,json,kind);
+  }
+  if(!r.ok&&cfg.json&&/json mode/i.test(msg)){cfg.json=false;return gemini(buf,onRetry,attempt,mode,text,json,kind);}
+  if(!r.ok&&cfg.think&&/think/i.test(msg)){cfg.think=false;return gemini(buf,onRetry,attempt,mode,text,json,kind);}
+  if(!r.ok&&/modality/i.test(msg)&&mode==='pdf'){
+    if(text.trim().length>30)return gemini(buf,onRetry,0,'text',text,json,kind);
+    throw new Error('Model này không đọc được file PDF/ảnh và file này là PDF scan (không có chữ). Hãy chọn model khác ở ô Model.');
+  }
+  if(!r.ok)throw new Error(msg||('HTTP '+r.status));
+  const cand=j.candidates&&j.candidates[0];
+  const parts=cand&&cand.content&&cand.content.parts;
+  if(!parts){
+    const why=(j.promptFeedback&&j.promptFeedback.blockReason)||(cand&&cand.finishReason)||'không rõ';
+    throw new Error('Gemini không trả kết quả (lý do: '+why+'). Hãy thử lại hoặc đổi model.');
+  }
+  const t=parts.map(p=>p.text||'').join('');
+  let o;try{o=JSON.parse((t.match(/\{[\s\S]*\}/)||[t])[0]);}catch(e){throw new Error('Gemini trả về kết quả không đọc được, hãy thử lại.');}
+  return normAI(o,kind);
+}
+ 
+const DEF={gemini:{m:'gemini-3.8-flash',k:'gem',n:'Gemini'},claude:{m:'claude-haiku-5-5',k:'cla',n:'Claude'},groq:{m:'llama-3.3-70b-versatile',k:'groq',n:'Groq'}};
+function prov(){return $('prov').value}
+const PYCPROMPT='Đây là Phiếu yêu cầu vật tư. Trả về JSON đúng dạng {"dept":"tên ở ô PHÒNG BAN / DỰ ÁN, ví dụ KHO TỔNG","date":"YYYYMMDD là Ngày cấp (Issue Date), không phải Ngày yêu cầu","item":"nội dung ở ô Hạng mục (Works item)"}. Chỉ trả JSON, không giải thích.';
+function AIP(kind){if(kind==='pyc')return PYCPROMPT;return AIPROMPT+(me()?' Người mua hàng là "'+me()+'", KHÔNG được lấy làm người bán.':'');}
+const AIPROMPT='Đây là hóa đơn. Trả về JSON đúng dạng {"date":"YYYYMMDD là ngày lập hóa đơn","number":"số hóa đơn, giữ nguyên số 0 đứng đầu, chỉ chữ số","seller":"tên đầy đủ của đơn vị bán hàng (người bán) như ghi trên hóa đơn"}. Người bán là đơn vị xuất hóa đơn, KHÔNG phải đơn vị cung cấp phần mềm hóa đơn điện tử (như SOFTDREAMS, BKAV, VNPT, MISA, Viettel, FPT) và không phải người mua. Chỉ trả JSON, không giải thích.';
+ 
+async function claude(it,onRetry,attempt=0){
+  const key=$('key').value.trim(),model=$('model').value.trim()||DEF.claude.m;
+  const hasText=(it.text||'').trim().length>50;
+  const content=hasText?[{type:'text',text:AIP(it.kind)+'\n\nNội dung văn bản của hóa đơn:\n'+it.text.slice(0,6000)}]
+    :[{type:'document',source:{type:'base64',media_type:'application/pdf',data:b64(it.buf)}},{type:'text',text:AIP(it.kind)}];
+  const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',
+    headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+    body:JSON.stringify({model,max_tokens:300,messages:[{role:'user',content}]})});
+  let j={};try{j=await r.json();}catch(e){}
+  const msg=(j.error&&j.error.message)||'';
+  if([429,500,502,503,504,529].includes(r.status)&&attempt<4){
+    const wait=3*Math.pow(2,attempt);if(onRetry)onRetry(attempt+1,wait);
+    await new Promise(x=>setTimeout(x,wait*1000));return claude(it,onRetry,attempt+1);
+  }
+  if(!r.ok)throw new Error(msg||('HTTP '+r.status));
+  const t=(j.content||[]).map(c=>c.text||'').join('');
+  let o;try{o=JSON.parse((t.match(/\{[\s\S]*\}/)||[t])[0]);}catch(e){throw new Error('Claude trả về kết quả không đọc được, hãy thử lại.');}
+  return normAI(o,it.kind);
+}
+ 
+async function pageToJpeg(buf,scale=1.6){
+  const pdf=await pdfjsLib.getDocument({data:new Uint8Array(buf.slice(0))}).promise;
+  const pg=await pdf.getPage(1),vp=pg.getViewport({scale});
+  const c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;
+  await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;
+  return c.toDataURL('image/jpeg',0.8);
+}
+ 
+async function groqPickModel(key,scan){
+  const r=await fetch('https://api.groq.com/openai/v1/models',{headers:{Authorization:'Bearer '+key}});
+  const j=await r.json();if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+  const ids=(j.data||[]).map(m=>m.id);
+  const ok=ids.filter(i=>!/whisper|tts|guard|embed|safeguard|orpheus|playai/i.test(i));
+  $('models').innerHTML=ok.map(x=>'<option value="'+x+'">').join('');
+  const pref=scan?/scout|maverick|vision/i:/instant|8b|20b|llama/i;
+  return ok.find(i=>pref.test(i))||ok[0];
+}
+ 
+async function groq(it,onRetry,attempt=0,fixed=false){
+  const key=$('key').value.trim(),model=$('model').value.trim()||DEF.groq.m;
+  const hasText=(it.text||'').trim().length>50;
+  const content=hasText?AIP(it.kind)+'\n\nNội dung văn bản của hóa đơn:\n'+it.text.slice(0,6000)
+    :[{type:'text',text:AIP(it.kind)},{type:'image_url',image_url:{url:await pageToJpeg(it.buf)}}];
+  const body={model,temperature:0,messages:[{role:'user',content}]};
+  if(cfg.json)body.response_format={type:'json_object'};
+  const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body)});
+  let j={};try{j=await r.json();}catch(e){}
+  const msg=(j.error&&j.error.message)||'';
+  if(r.status===429&&/per day|TPD|RPD/i.test(msg))throw new Error('Đã hết hạn mức miễn phí trong ngày của model này. Hãy đổi model khác ở ô Model hoặc thử lại sau.');
+  if([429,500,502,503,504].includes(r.status)&&attempt<4){
+    const wait=Math.min(30,Number(r.headers.get('retry-after'))||3*Math.pow(2,attempt));
+    if(onRetry)onRetry(attempt+1,wait);
+    await new Promise(x=>setTimeout(x,wait*1000));return groq(it,onRetry,attempt+1);
+  }
+  if(!r.ok&&cfg.json&&/response_format|json/i.test(msg)){cfg.json=false;return groq(it,onRetry,attempt);}
+  if(!r.ok&&!fixed&&/does not exist|do not have access|decommission|model_not_found|not support chat|chat completions/i.test(msg)){
+    const m=await groqPickModel(key,!hasText);
+    if(!m)throw new Error('Key này không có model nào dùng được trên Groq.');
+    $('model').value=m;cfg.json=true;saveCfg();
+    return groq(it,onRetry,attempt,true);
+  }
+  if(!r.ok){
+    if(!hasText&&/image|vision|multimodal|content/i.test(msg))throw new Error('File này là PDF scan nên cần model đọc được ảnh (vision). Bấm "Tải danh sách model" và chọn model vision. Chi tiết: '+msg);
+    throw new Error(msg||('HTTP '+r.status));
+  }
+  const t=(j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||'';
+  let o;try{o=JSON.parse((t.match(/\{[\s\S]*\}/)||[t])[0]);}catch(e){throw new Error('Groq trả về kết quả không đọc được, hãy thử lại.');}
+  return normAI(o,it.kind);
+}
+ 
+async function runAI(it){
+  const nm=DEF[prov()].n;
+  if(!$('key').value.trim()){it.note='Chưa nhập API key.';render();return;}
+  it.note='Đang hỏi '+nm+'...';render();
+  try{
+    const cb=(n,w)=>{it.note=nm+' đang quá tải, thử lại lần '+n+'/4 sau '+w+' giây...';render();};
+    const r=prov()==='claude'?await claude(it,cb):prov()==='groq'?await groq(it,cb):await gemini(it.buf,cb,0,(it.text||'').trim().length>50?'text':'pdf',it.text||'',true,it.kind);
+    if(r.date)it.date=r.date;
+    if(it.kind==='pyc'){if(r.dept)it.dept=r.dept;if(r.item)it.item=r.item;}
+    else{if(r.num)it.num=r.num;if(r.seller&&!isBuyer(r.seller))it.seller=r.seller;}
+    it.note='Đã đọc bằng '+nm+' ('+$('model').value+'), vui lòng kiểm tra lại.';
+  }catch(e){it.note=nm+' lỗi: '+e.message;render();return /hết hạn mức/.test(e.message)?'quota':'err';}
+  render();return 'ok';
+}
+ 
+function loadProv(){
+  const d=DEF[prov()];let k='',m='';
+  try{k=localStorage.getItem(d.k+'_key')||'';m=localStorage.getItem(d.k+'_model')||'';}catch(e){}
+  if(/2\.5|2\.0|1\.5/.test(m))m='';
+  $('key').value=k;$('model').value=m||d.m;
+  $('key').placeholder={claude:'sk-ant-...',groq:'gsk_...',gemini:'AIza...'}[prov()];
+  $('keylbl').textContent={claude:'Claude API key (tạo tại console.anthropic.com, cần có tín dụng API)',groq:'Groq API key (lấy miễn phí tại console.groq.com/keys)',gemini:'Gemini API key (lấy tại aistudio.google.com/apikey)'}[prov()];
+  $('lm').style.display=prov()==='claude'?'none':'';
+}
+let curProv='gemini';
+function saveCfg(){try{const d=DEF[curProv];localStorage.setItem('prov',prov());
+  if($('remember').checked){localStorage.setItem(d.k+'_key',$('key').value.trim());localStorage.setItem(d.k+'_model',$('model').value.trim());}
+  else localStorage.removeItem(d.k+'_key');}catch(e){}}
+try{const pv=localStorage.getItem('prov');if(pv&&DEF[pv])$('prov').value=pv;}catch(e){}
+curProv=prov();loadProv();
+try{const mn=localStorage.getItem('me_name');if(mn!==null)$('me').value=mn;}catch(e){}
+$('me').onchange=()=>{try{localStorage.setItem('me_name',$('me').value.trim());}catch(e){}};
+$('prov').onchange=()=>{saveCfg();curProv=prov();loadProv();};
+$('key').onchange=$('model').onchange=$('remember').onchange=saveCfg;
+$('model').addEventListener('change',()=>{cfg.json=true;cfg.think=true;});
+ 
+$('lm').onclick=async()=>{
+  try{
+    const k=$('key').value.trim(),g=prov()==='groq';
+    const r=await fetch(g?'https://api.groq.com/openai/v1/models':'https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key='+encodeURIComponent(k),g?{headers:{Authorization:'Bearer '+k}}:{});
+    const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||r.status);
+    const n=g?(j.data||[]).map(m=>m.id).filter(i=>!/whisper|tts|guard|embed|safeguard|orpheus|playai/i.test(i)):(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')).map(m=>m.name.replace('models/',''));
+    $('models').innerHTML=n.map(x=>'<option value="'+x+'">').join('');
+    alert('Có '+n.length+' model dùng được. Xóa ô Model rồi bấm vào ô để chọn trong danh sách.');
+  }catch(e){alert('Lỗi: '+e.message);}
+};
+ 
+let ocrWorker=null,ocrChain=Promise.resolve();
+function ocr(it){
+  ocrChain=ocrChain.then(async()=>{
+    try{
+      it.note='Đang đọc chữ từ file scan (OCR), lần đầu có thể mất vài chục giây...';render();
+      if(typeof Tesseract==='undefined')throw new Error('chưa tải được thư viện OCR (kiểm tra mạng)');
+      if(!ocrWorker)ocrWorker=await Tesseract.createWorker('vie');
+      const {data}=await ocrWorker.recognize(await pageToJpeg(it.buf,2.5));
+      it.text=data.text||'';
+      applyParsed(it,parseDoc(it.text));
+      it.note=it.text.trim().length>50?'Đã đọc bằng OCR, vui lòng kiểm tra kỹ lại.':'Không đọc được chữ từ file scan, hãy điền tay.';
+    }catch(e){it.note='OCR lỗi: '+e.message;}
+    render();
+  });
+  return ocrChain;
+}
+ 
+async function addFiles(files){
+  const batch=[];
+  for(const f of [...files].filter(f=>/\.pdf$/i.test(f.name))){
+    let buf,txt='',info={date:'',num:'',seller:''};
+    try{const r=await readPdf(f);buf=r.buf;txt=r.text;info=parseDoc(r.text);}catch(e){buf=await f.arrayBuffer();}
+    const it={kind:'hd',date:'',num:'',seller:'',dept:'',item:'',file:f,buf,text:txt,note:'',...info};
+    items.push(it);batch.push(it);render();
+  }
+  let idx=0,quotaHit=false;
+  async function worker(){
+    while(idx<batch.length){
+      const it=batch[idx++];
+      if((it.text||'').trim().length<=50)await ocr(it);
+      const missing=isMissing(it);
+      if(!quotaHit&&useAI()&&(!$('onlymiss').checked||missing)){
+        if(await runAI(it)==='quota')quotaHit=true;
+      }
+    }
+  }
+  await Promise.all([worker(),worker(),worker(),worker()]);
+}
+ 
+$('drop').onclick=()=>$('file').click();
+$('file').onchange=e=>addFiles(e.target.files);
+['dragover','dragenter'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.add('over')}));
+['dragleave','drop'].forEach(ev=>$('drop').addEventListener(ev,e=>{e.preventDefault();$('drop').classList.remove('over')}));
+$('drop').addEventListener('drop',e=>addFiles(e.dataTransfer.files));
+$('clear').onclick=()=>{items.length=0;render();};
+$('zip').onclick=async()=>{
+  const z=new JSZip(),used={};
+  items.forEach(it=>{let n=fullName(it);if(used[n]){n=n.replace(/\.pdf$/,'_'+(++used[n])+'.pdf')}else used[n]=1;z.file(n,it.buf);});
+  save(await z.generateAsync({type:'blob'}),'hoa_don_da_doi_ten.zip');
+};
+</script>
+</body>
+</html>
